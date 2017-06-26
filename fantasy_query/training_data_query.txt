@@ -1,0 +1,105 @@
+—-nba fantasy
+
+--grid Uranuim blue
+
+--get manager info
+
+--create database yizhouub location '/user/yizhouz';
+
+use yizhouub;
+DROP TABLE IF EXISTS nba2015_league2;
+CREATE TABLE nba2015_league2 AS
+select a.guid as guid, a.league_id as league_id, a.is_comissioner as is_comissioner,
+a.is_comanager as is_comanager, a.is_assistant_comissioner as is_assistant_comissioner,
+ b.league_type as league_type, -- private vs public
+ b.draft_type as draft_type, -- live vs self vs auto
+ b.number_of_teams as league_size,
+ b.max_teams as max_teams,
+ b.number_of_commissioners as number_of_comissioners,
+ b.is_cash_league as is_cash_league,
+ b.cash_entry_fee as cash_entry_fee,
+ b.was_renewed as was_renewed,
+ b.was_auto_renewed as was_auto_renewed,
+ b.was_renewed_and_teams_auto_filled as was_renewed_and_teams_auto_filled,
+c.final_rank as final_rank, c.winning_percentage as winning_percentage, c.number_of_adds as number_of_adds, c.number_of_accepted_trades as number_of_accepted_trades,
+c.number_of_roster_changes as number_of_roster_changes, c.number_of_posted_messages as number_of_posted_messages,
+c.has_custom_logo as has_custom_logo
+from maw_dim.dim_fantasy_managers a, maw_dim.dim_fantasy_leagues b, maw_dim.dim_fantasy_teams c
+where a.game_id = 353 and b.game_id = 353 and c.game_id = 353
+and a.league_id = b.league_id and a.league_id = c.league_id
+and a.team_id = c.team_id
+and a.date = '20170308' and b.date = '20170124' and c.date = '20170124';
+
+DROP TABLE IF EXISTS info_nba2;
+CREATE TABLE info_nba2 AS
+SELECT guid, COUNT(DISTINCT league_id) as league_all,
+ (CASE WHEN SUM(CAST(is_comissioner as INT))>0 THEN 1 ELSE 0 END) as comissioner,
+ (CASE WHEN SUM(CAST(is_comanager as INT))>0 THEN 1 ELSE 0 END) as comanager,
+ (CASE WHEN SUM(CAST(is_assistant_comissioner as INT))>0 THEN 1 ELSE 0 END) as assistant_comissioner,
+ (CASE WHEN SUM(CAST(has_custom_logo == TRUE as INT)) > 0 THEN 1 ELSE 0 END) as has_custom_logo,
+ MAX(league_size) as league_size_max,
+ MAX(winning_percentage) as winning_pct_max,
+ (CASE WHEN SUM(CASE WHEN is_cash_league THEN 1 ELSE 0 END)>0 THEN 1 ELSE 0 END) as cash_league,
+ (CASE WHEN SUM(CASE WHEN final_rank < league_size/2 THEN 1 ELSE 0 END)>0 THEN 1 ELSE 0 END) as ranked_top_half,
+ (CASE WHEN SUM(CASE WHEN final_rank < 4 and league_size >= 4 THEN 1 ELSE 0 END)>0 THEN 1 ELSE 0 END) as ranked_top3,
+ SUM(CAST(was_renewed AS INT)) as leagues_renewed,
+ SUM(CAST(was_auto_renewed AS INT)) as leagues_auto_renewed,
+ SUM(CAST(was_renewed_and_teams_auto_filled AS INT)) as leagues_was_renewed_and_teams_auto_filled,
+ MAX(number_of_adds) AS number_of_adds, MAX(number_of_roster_changes) AS number_of_roster_changes, MAX(number_of_accepted_trades) AS number_of_accepted_trades, MAX(number_of_posted_messages) AS number_of_posted_messages,
+ SUM(CASE WHEN league_type = "private" AND draft_type = "self" THEN 1 ELSE 0 END) as private_self_plays,
+ SUM(CASE WHEN league_type = "private" AND draft_type = "live" THEN 1 ELSE 0 END) as private_live_plays,
+ SUM(CASE WHEN league_type = "private" AND draft_type = "auto" THEN 1 ELSE 0 END) as private_auto_plays,
+ SUM(CASE WHEN league_type = "public" AND draft_type = "auto" THEN 1 ELSE 0 END) as public_auto_plays,
+ SUM(CASE WHEN league_type = "public" AND draft_type = "live" THEN 1 ELSE 0 END) as public_live_plays,
+ (CASE WHEN MAX(cash_entry_fee) > 0 THEN MAX(cash_entry_fee) ELSE 0 END) as cash_entry_fee_max,
+ AVG(number_of_comissioners) as number_of_comissoners_avg
+ FROM nba2015_league2
+GROUP BY guid;
+
+
+
+DROP TABLE IF EXISTS  nba2015_player_step2_2;
+CREATE TABLE  nba2015_player_step2_2 AS
+SELECT a.*, (CASE WHEN b.guid IS NULL THEN 1 ELSE 0 END) AS new, COALESCE(b.return_comissioner, 0) as return_comissioner, COALESCE(b.return_player, 0) as return_player
+FROM
+info_nba2 a
+LEFT OUTER JOIN
+(SELECT c.guid as guid, (CASE WHEN c.league_comissioner > 0 THEN 1 ELSE 0 END) AS return_comissioner,
+ (CASE WHEN c.league_comissioner == 0 AND c.league_all > 0 THEN 1 ELSE 0 END) AS return_player
+ FROM
+ (SELECT guid, SUM(CASE WHEN is_comissioner THEN 1 ELSE 0 END) as league_comissioner, COUNT(*) as league_all
+ from maw_dim.dim_fantasy_managers a
+ WHERE a.date='20170308' AND a.game_id IN (304,322,342)
+ GROUP BY guid
+ ) c
+) b
+on a.guid = b.guid
+;
+
+DROP TABLE IF EXISTS  nba2015_player2;
+CREATE TABLE  nba2015_player2 AS
+SELECT a.*, (CASE WHEN b.guid IS NULL THEN 1 ELSE 0 END) AS other_league_inactive,
+COALESCE(b.other_league_comissioner, 0) as other_league_comissioner,
+COALESCE(b.other_league_player, 0) as other_league_player
+FROM
+ nba2015_player_step2 a
+LEFT OUTER JOIN
+(SELECT guid,
+ (CASE WHEN SUM(CASE WHEN is_comissioner THEN 1 ELSE 0 END)>0 THEN 1 ELSE 0 END) as other_league_comissioner,
+ (CASE WHEN SUM(CASE WHEN is_comissioner THEN 1 ELSE 0 END) == 0 THEN 1 ELSE 0 END) as other_league_player
+ from maw_dim.dim_fantasy_managers a
+ WHERE a.date='20170308' AND a.game_id IN (346, 352, 348)
+ GROUP BY guid
+) b
+on a.guid = b.guid
+;
+
+DROP TABLE IF EXISTS  nba2015_player_retention2;
+CREATE TABLE  nba2015_player_retention2 AS
+SELECT (CASE WHEN b.guid IS NOT NULL THEN 1 ELSE 0 END) AS returned, a.*
+FROM  nba2015_player2 a
+LEFT OUTER JOIN
+(SELECT DISTINCT guid FROM maw_dim.dim_fantasy_managers a
+ WHERE a.date='20170308' AND a.game_id = 364
+) b
+on a.guid = b.guid;
