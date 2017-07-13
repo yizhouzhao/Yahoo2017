@@ -1,0 +1,153 @@
+—Data Query
+
+—benzene data
+
+use yizhoudb;
+
+drop table if exists random_users;
+drop view if exists random_users;
+create view random_users as
+select distinct bcookie as bcookie from benzene.daily_data
+where ptyid = 47729
+and dt >= '20170601’ and dt <= '20170607’
+AND network= 'on' AND pty_device = 'desktop' AND pty_experience = 'web'
+and pty_country == 'us'
+AND filter_tag IS NULL
+AND sid is NOT NULL
+order by rand() limit 1000000
+;
+
+————————————————————hualidefengexian———————————
+—-order by rand() limit 1000000;
+—-where rand() < 0.01 
+
+drop view if exists user_click;
+create view user_click as
+select a.bcookie, a.dt, a.bcookie_age from benzene.daily_data a
+where a.ptyid = 47729
+and a.dt >= '20170601' and a.dt <= '20170607'
+AND a.network= 'on' AND a.pty_device = 'desktop' AND a.pty_experience = 'web'
+and a.pty_country == 'us'
+AND a.filter_tag IS NULL
+AND a.sid is NOT NULL
+and a.bcookie is not null
+;
+
+
+
+drop table if exists user_cata;
+drop view if exists user_cata;
+create table user_cata as
+select a.bcookie as bcookie, (case when a.dv < 2 then 'T'
+when a.dv = 2 then 'O' when a.dv = 3 or a.dv = 4 then 'A' when a.dv = 5 or
+a.dv = 6 then 'L' else 'F' end) as flaot, a.dv as dv1, a.age
+from
+(select count(distinct dt) as dv,
+ (case when min(cast(bcookie_age as int)) > 3600000 THEN 'existing'
+  when min(cast(bcookie_age as int)) < 0 Then 'invalid'
+  else 'new' END) as age, bcookie from user_click
+group by bcookie) a
+order by rand() limit 1000000;
+
+
+drop table if exists user_click_n;
+drop view if exists user_click_n;
+create view user_click_n as
+select a.bcookie, a.dt from benzene.daily_data a
+where a.ptyid = 47729
+and a.dt >= '20170622' and a.dt <= '20170628'
+AND a.network= 'on' AND a.pty_device = 'desktop' AND a.pty_experience = 'web'
+and a.pty_country == 'us'
+AND a.filter_tag IS NULL
+AND a.sid is NOT NULL
+;
+
+drop view if exists user_cata_n;
+create view user_cata_n as
+select a.bcookie as bcookie, (case when a.dv < 2 then 'T'
+when a.dv = 2 then 'O' when a.dv = 3 or a.dv = 4 then 'A' when a.dv = 5 or
+a.dv = 6 then 'L' else 'F' end) as flaot, a.dv as dv2
+from
+(select count(distinct dt) as dv, bcookie from user_click_n
+group by bcookie) a, user_cata b
+where a.bcookie = b.bcookie
+;
+
+drop table if exists user_trans;
+create table user_trans as
+select a.bcookie, a.flaot as ori, a.dv1, a.age, coalesce(b.flaot,'N') as thi, coalesce(b.dv2, 0) as dv2 from
+user_cata a
+left join
+user_cata_n b
+on a.bcookie = b.bcookie
+;
+
+—-get click info
+drop view if exists click_info;
+create view click_info as
+select bcookie, click_info['slk'] as slk, click_info['sec'] as sec, click_info['pkgt'] as pkgt,
+click_info['cnt_tpc'] as cnttpc, is_additive_view,
+session_info['property_session_id'] as session from benzene.daily_data
+where ptyid = 47729
+and dt >= '20170622' and dt <= '20170628'
+AND network= 'on' AND pty_device = 'desktop' AND pty_experience = 'web'
+and pty_country == 'us'
+AND filter_tag IS NULL
+AND sid is NOT NULL
+;
+
+
+
+drop table if exists trans_ana;
+drop view if exists trans_ana;
+create table trans_ana as
+select a.ori, a.thi,a.age, a.dv1, a.dv2, b.* from user_trans a,
+(select bcookie,
+count(distinct session) as session,
+sum(cast(is_additive_view as INT)) as apv,
+sum(cast(slk == 'mail' as INT)) as lmail,
+sum(cast(sec =='hd' and slk == 'Mail' as INT)) as rmail,
+sum(cast(slk == 'Sign in' as int)) as signin,
+sum(cast(slk == 'follow' as int)) as follow,
+sum(cast(sec == 'tc-ts' as int)) as tcts,
+sum(cast(sec == 'app-wea' as int)) as weather,
+sum(cast(sec == 'nav' and slk == 'news' as int)) as news,
+sum(cast(sec == 'nav' and slk == 'finance' as int)) as finance,
+sum(cast(sec == 'nav' and slk == 'sports' as int)) as sports,
+sum(cast(sec == 'nav' and slk == 'politics' as int)) as politics,
+sum(cast(sec == 'nav' and slk == 'celebrity' as int)) as celebrity,
+sum(cast(sec == 'nav' and slk == 'tv' as int)) as tv,
+sum(cast(sec == 'nav' and slk == 'style' as int)) as style,
+sum(cast(slk == 'more' as int)) as more_,
+sum(cast((sec == 'rr-promo') or  (sec == 'hd' and slk == 'view') as int)) as promo,
+sum(cast(sec == 'srch' as int)) as search,
+sum(cast(sec == 'scrbrd' as int)) as scoreboard,
+sum(cast((sec == 'hpset_rr') or (sec == 'hd' and slk = 'hpsetpromo') as int)) as homepageset,
+sum(cast(sec == 'rapidDwell'as int)) as rapidDwell,
+sum(cast(sec == 'nav' as int)) as nav,
+sum(cast(sec == 'hd' as int)) as head,
+sum(cast(sec == 'strm' as int)) as stream,
+sum(cast(sec == 'strm' and pkgt like 'spon%' as int)) as streamads,
+sum(cast(sec == 'strm' and cnttpc == 'Politics' as int)) as streampolitics,
+sum(cast(sec == 'strm' and cnttpc == 'Sports' as int)) as streamsports,
+sum(cast(sec == 'strm' and cnttpc == 'U.S.' as int)) as streamus,
+sum(cast(sec == 'strm' and cnttpc == 'Lifestyle' as int)) as streamlifestyle,
+sum(cast(sec == 'strm' and cnttpc == 'Style' as int)) as streamstyle,
+sum(cast(sec == 'strm' and cnttpc == 'World' as int)) as streamworld,
+sum(cast(sec == 'strm' and cnttpc == 'Health' as int)) as streamhealth,
+sum(cast(sec == 'strm' and cnttpc == 'Celebrity' as int)) as streamcelebrity,
+sum(cast(sec == 'strm' and cnttpc == 'Business' as int)) as streambusiness,
+sum(cast(sec == 'strm' and cnttpc == 'Entertainment' as int)) as streamentertainment,
+sum(cast(sec == 'strm' and cnttpc == 'Technology' as int)) as streamtechnology,
+sum(cast(sec == 'strm' and slk == 'cmmt' as int)) as cmmt,
+sum(cast(sec == 'strm' and slk == 'like' as int)) as love,
+sum(cast((sec == 'strm') and (slk == 'Twitter' or slk == 'Facebook' or slk =='Tumblr' or slk == 'Email') as int)) as share
+from click_info
+group by bcookie) b
+where a.bcookie = b.bcookie
+;
+
+
+select * from
+(select row_number() over (partition by 1) rn, d.* from departments d) q
+where q.rn = 3;
